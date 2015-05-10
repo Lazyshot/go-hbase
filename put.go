@@ -52,7 +52,5 @@ func (this *Put) toProto() pb.Message {
 
 	p.ColumnValue = append(p.ColumnValue, cv)
 
-	log.Debug("Put: %#v", p)
-
 	return p
 }

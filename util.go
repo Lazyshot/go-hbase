@@ -30,3 +30,13 @@ func (a *atomicCounter) IncrAndGet() int {
 	a.lock.Unlock()
 	return v
 }
+
+func incrementByteString(d []byte, i int) []byte {
+	r := []byte
+	copy(r, d)
+	if i == 0 {
+		return append(make([]byte, 1), r...) 
+	}
+	r[i]++
+	return r
+}

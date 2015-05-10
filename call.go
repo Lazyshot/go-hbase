@@ -23,6 +23,12 @@ func newCall(request pb.Message) *call {
 	case *proto.MutateRequest:
 		responseBuffer = &proto.MutateResponse{}
 		methodName = "Mutate"
+	case *proto.MultiRequest:
+		responseBuffer = &proto.MultiResponse{}
+		methodName = "Multi"
+	case *proto.ScanRequest:
+		responseBuffer = &proto.ScanResponse{}
+		methodName = "Scan"
 	}
 
 	return &call{
@@ -34,6 +40,8 @@ func newCall(request pb.Message) *call {
 }
 
 func (c *call) complete(err error, response []byte) {
+	log.Debug("Response received [err=%#v] [response_n=%d]", err, len(response))
+
 	if err != nil {
 		panic(err)
 	}

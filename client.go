@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 )
@@ -28,6 +29,17 @@ type Client struct {
 }
 
 var log = logging.MustGetLogger("hbase-client")
+var format = logging.MustStringFormatter(
+	"%{color}%{time:15:04:05.000} %{shortfunc} ▶ %{level:.5s} %{id:03x}%{color:reset} %{message}",
+)
+
+func init() {
+	backend := logging.NewLogBackend(os.Stderr, "", 0)
+	backendFormatter := logging.NewBackendFormatter(backend, format)
+	logging.SetBackend(backend, backendFormatter)
+
+	//logging.SetLevel(logging.INFO, "hbase-client")
+}
 
 func NewClient(zkHosts []string, zkRoot string) *Client {
 	cl := &Client{
@@ -59,12 +71,7 @@ func (c *Client) initZk() {
 	}
 
 	c.rootServer = c.decodeMeta(res)
-	c.getRegionConnection(&regionInfo{
-		startKey: []byte{},
-		endKey:   []byte{},
-		name:     string(META_REGION_NAME),
-		server:   c.getServerName(c.rootServer),
-	})
+	c.getRegionConnection(c.getServerName(c.rootServer))
 }
 
 func (c *Client) decodeMeta(data []byte) *proto.ServerName {
@@ -92,17 +99,17 @@ func (c *Client) getServerName(server *proto.ServerName) string {
 	return fmt.Sprintf("%s:%d", server.GetHostName(), server.GetPort())
 }
 
-func (c *Client) getRegionConnection(server *regionInfo) *connection {
-	if s, ok := c.servers[server.name]; ok {
+func (c *Client) getRegionConnection(server string) *connection {
+	if s, ok := c.servers[server]; ok {
 		return s
 	}
 
-	conn, err := newConnection(server.server)
+	conn, err := newConnection(server)
 	if err != nil {
 		panic(err)
 	}
 
-	c.servers[server.name] = conn
+	c.servers[server] = conn
 
 	return conn
 }
@@ -111,7 +118,7 @@ func (c *Client) action(table, row []byte, action Action) *call {
 	log.Debug("Attempting action [table: %s] [row: %s] [action: %#v]", table, row, action)
 
 	region := c.locateRegion(table, row, true)
-	conn := c.getRegionConnection(region)
+	conn := c.getRegionConnection(region.server)
 
 	regionSpecifier := &proto.RegionSpecifier{
 		Type:  proto.RegionSpecifier_REGION_NAME.Enum(),
@@ -139,28 +146,70 @@ func (c *Client) action(table, row []byte, action Action) *call {
 	return cl
 }
 
-func (c *Client) Get(table string, get *Get) (*ResultRow, error) {
-	cl := c.action([]byte(table), get.key, get)
-
-	response := <-cl.responseCh
-	switch r := (*response).(type) {
-	case *proto.GetResponse:
-		return newResultRow(r.GetResult()), nil
-	}
-
-	return nil, fmt.Errorf("No valid response seen [response: %#v]", response)
+type multiaction struct {
+	row    []byte
+	action Action
 }
 
-func (c *Client) Put(table string, put *Put) (bool, error) {
-	cl := c.action([]byte(table), put.key, put)
+func (c *Client) multiaction(table []byte, actions []multiaction) []*call {
+	actionsByServer := make(map[string]map[string][]multiaction)
 
-	response := <-cl.responseCh
-	switch r := (*response).(type) {
-	case *proto.MutateResponse:
-		return r.GetProcessed(), nil
+	for _, action := range actions {
+		region := c.locateRegion(table, action.row, true)
+
+		if _, ok := actionsByServer[region.server]; !ok {
+			actionsByServer[region.server] = make(map[string][]multiaction)
+		}
+
+		if v, ok := actionsByServer[region.server][region.name]; ok {
+			v = append(v, action)
+		} else {
+			actionsByServer[region.server][region.name] = []multiaction{action}
+		}
 	}
 
-	return false, fmt.Errorf("No valid response seen [response: %#v]", response)
+	calls := make([]*call, 0)
+
+	for server, as := range actionsByServer {
+		region_actions := make([]*proto.RegionAction, len(as))
+		i := 0
+
+		for region, acts := range as {
+			racts := make([]*proto.Action, len(acts))
+			for i, act := range acts {
+				racts[i] = &proto.Action{
+					Index: pb.Uint32(uint32(i)),
+				}
+
+				switch a := act.action.(type) {
+				case *Get:
+					racts[i].Get = a.toProto().(*proto.Get)
+				case *Put:
+					racts[i].Mutation = a.toProto().(*proto.MutationProto)
+				}
+			}
+
+			region_actions[i] = &proto.RegionAction{
+				Region: &proto.RegionSpecifier{
+					Type:  proto.RegionSpecifier_REGION_NAME.Enum(),
+					Value: []byte(region),
+				},
+				Action: racts,
+			}
+		}
+
+		req := &proto.MultiRequest{
+			RegionAction: region_actions,
+		}
+
+		cl := newCall(req)
+		conn := c.getRegionConnection(server)
+		conn.call(cl)
+
+		calls = append(calls, cl)
+	}
+
+	return calls
 }
 
 func (c *Client) locateRegion(table, row []byte, useCache bool) *regionInfo {
@@ -179,9 +228,9 @@ func (c *Client) locateRegion(table, row []byte, useCache bool) *regionInfo {
 		return r
 	}
 
-	conn := c.getRegionConnection(metaRegion)
+	conn := c.getRegionConnection(metaRegion.server)
 
-	regionRow := c.createRegionName(table, row, "", true)
+	regionRow := c.createRegionName(table, row, "", false)
 
 	call := newCall(&proto.GetRequest{
 		Region: &proto.RegionSpecifier{
@@ -219,13 +268,15 @@ func (c *Client) locateRegion(table, row []byte, useCache bool) *regionInfo {
 				ts:       rr.Columns["info:server"].Timestamp.String(),
 			}
 
-			log.Debug("Found region [region: %#v]", region)
+			log.Debug("Found region [region: %s]", region.name)
 
 			c.cacheLocation(table, region)
 
 			return region
 		}
 	}
+
+	log.Debug("Couldn't find the region: [table=%s] [row=%s] [region_row=%s]", table, row, regionRow)
 
 	return nil
 }
@@ -239,6 +290,13 @@ func (c *Client) createRegionName(table, startKey []byte, id string, newFormat b
 		b = append(bytes.Join([][]byte{b, mhex}, []byte(".")), []byte(".")...)
 	}
 	return b
+}
+
+func (c *Client) prefetchRegionCache(table []byte) {
+	startRow := c.createRegionName(table, nil, ZEROS, false
+	stopRow := c.createRegionName(table, nil, ZEROS, false)
+
+
 }
 
 func (c *Client) cacheLocation(table []byte, region *regionInfo) {

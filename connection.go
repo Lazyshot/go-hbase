@@ -3,7 +3,6 @@ package hbase
 import (
 	pb "github.com/golang/protobuf/proto"
 	"github.com/lazyshot/go-hbase/proto"
-	"github.com/op/go-logging"
 
 	"fmt"
 	"net"
@@ -20,7 +19,6 @@ type connection struct {
 
 	calls  map[int]*call
 	callId *atomicCounter
-	log    *logging.Logger
 }
 
 var connectionIds *atomicCounter = newAtomicCounter()
@@ -28,7 +26,7 @@ var connectionIds *atomicCounter = newAtomicCounter()
 func newConnection(connstr string) (*connection, error) {
 	id := connectionIds.IncrAndGet()
 
-	log.Debug("Connecting to server[id=%d]: %s", id, connstr)
+	log.Debug("Connecting to server[id=%d] [%s]", id, connstr)
 
 	socket, err := net.Dial("tcp", connstr)
 
@@ -47,8 +45,6 @@ func newConnection(connstr string) (*connection, error) {
 
 		calls:  make(map[int]*call),
 		callId: newAtomicCounter(),
-
-		log: logging.MustGetLogger("connection"),
 	}
 
 	err = c.init()
@@ -56,7 +52,7 @@ func newConnection(connstr string) (*connection, error) {
 		return nil, err
 	}
 
-	c.log.Debug("Initted connection")
+	log.Debug("Initiated connection [id=%d] [%s]", id, connstr)
 
 	return c, nil
 }
@@ -85,7 +81,7 @@ func (c *connection) writeHead() error {
 	buf.WriteByte(80)
 
 	n, err := c.socket.Write(buf.Bytes())
-	c.log.Debug("Outgoing Bytes [Head] [n=%d]: %#v", n, buf.Bytes())
+	log.Debug("Outgoing Head [n=%d]", n)
 	return err
 }
 
@@ -111,7 +107,7 @@ func (c *connection) writeConnectionHeader() error {
 		return err
 	}
 
-	c.log.Debug("Outgoing Bytes [ConnHeader] [n=%d]: %#v", n, buf.Bytes())
+	log.Debug("Outgoing ConnHeader [n=%d]", n)
 
 	return nil
 }
@@ -151,8 +147,6 @@ func (c *connection) processMessages() {
 			continue
 		}
 
-		c.log.Debug("Messages received [n=%d] [msg_1=%d]", len(msgs), len(msgs[0]))
-
 		var rh proto.ResponseHeader
 		err := pb.Unmarshal(msgs[0], &rh)
 		if err != nil {
@@ -160,7 +154,6 @@ func (c *connection) processMessages() {
 		}
 
 		callId := rh.GetCallId()
-		log.Debug("Resp: %s", rh.String())
 		call, ok := c.calls[int(callId)]
 		if !ok {
 			panic(fmt.Errorf("Invalid call id: %d", callId))

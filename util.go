@@ -32,10 +32,10 @@ func (a *atomicCounter) IncrAndGet() int {
 }
 
 func incrementByteString(d []byte, i int) []byte {
-	r := []byte
+	r := make([]byte, len(d))
 	copy(r, d)
-	if i == 0 {
-		return append(make([]byte, 1), r...) 
+	if i <= 0 {
+		return append(make([]byte, 1), r...)
 	}
 	r[i]++
 	return r

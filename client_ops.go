@@ -4,6 +4,7 @@ import (
 	"github.com/lazyshot/go-hbase/proto"
 
 	"fmt"
+	"sync"
 )
 
 func (c *Client) Get(table string, get *Get) (*ResultRow, error) {
@@ -30,7 +31,13 @@ func (c *Client) AsyncGets(table string, gets []*Get) chan *ResultRow {
 
 	calls := c.multiaction([]byte(table), actions)
 	results := make(chan *ResultRow, 1000)
-	i := 0
+	wg := new(sync.WaitGroup)
+	wg.Add(len(calls))
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
 
 	for _, call := range calls {
 		go func() {
@@ -38,6 +45,7 @@ func (c *Client) AsyncGets(table string, gets []*Get) chan *ResultRow {
 
 			switch rs := (*r).(type) {
 			case *proto.MultiResponse:
+				log.Debug("Received region action result [n=%d]", len(rs.GetRegionActionResult()))
 				for _, v := range rs.GetRegionActionResult() {
 					for _, v2 := range v.GetResultOrException() {
 						if res := v2.GetResult(); res != nil {
@@ -47,10 +55,7 @@ func (c *Client) AsyncGets(table string, gets []*Get) chan *ResultRow {
 				}
 			}
 
-			i++
-			if i == len(calls) {
-				close(results)
-			}
+			wg.Done()
 		}()
 	}
 
@@ -93,4 +98,8 @@ func (c *Client) Puts(table string, puts []*Put) (bool, error) {
 	c.multiaction([]byte(table), actions)
 
 	return true, nil
+}
+
+func (c *Client) Scan(table string) *Scan {
+	return newScan([]byte(table), c)
 }

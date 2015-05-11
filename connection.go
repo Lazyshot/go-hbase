@@ -134,6 +134,7 @@ func (c *connection) call(request *call) {
 	if err != nil {
 		panic(err)
 	}
+	log.Debug("Sent bytes to server [n=%d] [connection=%s]", n, c.name)
 
 	if n != len(buf.Bytes()) {
 		panic("Sent bytes not match number bytes")

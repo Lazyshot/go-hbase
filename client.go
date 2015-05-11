@@ -25,20 +25,22 @@ type Client struct {
 	servers               map[string]*connection
 	cachedRegionLocations map[string]map[string]*regionInfo
 
+	prefetched map[string]bool
+
 	rootServer *proto.ServerName
 }
 
 var log = logging.MustGetLogger("hbase-client")
 var format = logging.MustStringFormatter(
-	"%{color}%{time:15:04:05.000} %{shortfunc} ▶ %{level:.5s} %{id:03x}%{color:reset} %{message}",
+	"%{color}%{time:15:04:05.000} %{shortfunc} [%{level:.5s}] %{color:reset} %{message}",
 )
 
 func init() {
 	backend := logging.NewLogBackend(os.Stderr, "", 0)
 	backendFormatter := logging.NewBackendFormatter(backend, format)
-	logging.SetBackend(backend, backendFormatter)
+	logging.SetBackend(backendFormatter)
 
-	//logging.SetLevel(logging.INFO, "hbase-client")
+	logging.SetLevel(logging.INFO, "hbase-client")
 }
 
 func NewClient(zkHosts []string, zkRoot string) *Client {
@@ -49,6 +51,7 @@ func NewClient(zkHosts []string, zkRoot string) *Client {
 
 		servers:               make(map[string]*connection),
 		cachedRegionLocations: make(map[string]map[string]*regionInfo),
+		prefetched:            make(map[string]bool),
 	}
 
 	cl.initZk()
@@ -161,8 +164,8 @@ func (c *Client) multiaction(table []byte, actions []multiaction) []*call {
 			actionsByServer[region.server] = make(map[string][]multiaction)
 		}
 
-		if v, ok := actionsByServer[region.server][region.name]; ok {
-			v = append(v, action)
+		if _, ok := actionsByServer[region.server][region.name]; ok {
+			actionsByServer[region.server][region.name] = append(actionsByServer[region.server][region.name], action)
 		} else {
 			actionsByServer[region.server][region.name] = []multiaction{action}
 		}
@@ -189,6 +192,8 @@ func (c *Client) multiaction(table []byte, actions []multiaction) []*call {
 				}
 			}
 
+			log.Debug("Sending Actions [n=%d]", len(racts))
+
 			region_actions[i] = &proto.RegionAction{
 				Region: &proto.RegionSpecifier{
 					Type:  proto.RegionSpecifier_REGION_NAME.Enum(),
@@ -197,6 +202,8 @@ func (c *Client) multiaction(table []byte, actions []multiaction) []*call {
 				Action: racts,
 			}
 		}
+
+		log.Debug("Sending RegionActions [n=%d]", len(region_actions))
 
 		req := &proto.MultiRequest{
 			RegionAction: region_actions,
@@ -224,13 +231,15 @@ func (c *Client) locateRegion(table, row []byte, useCache bool) *regionInfo {
 		return metaRegion
 	}
 
+	c.prefetchRegionCache(table)
+
 	if r := c.getCachedLocation(table, row); r != nil {
 		return r
 	}
 
 	conn := c.getRegionConnection(metaRegion.server)
 
-	regionRow := c.createRegionName(table, row, "", false)
+	regionRow := c.createRegionName(table, row, "", true)
 
 	call := newCall(&proto.GetRequest{
 		Region: &proto.RegionSpecifier{
@@ -253,21 +262,7 @@ func (c *Client) locateRegion(table, row []byte, useCache bool) *regionInfo {
 	switch r := (*response).(type) {
 	case *proto.GetResponse:
 		rr := newResultRow(r.GetResult())
-		if regionInfoCol, ok := rr.Columns["info:regioninfo"]; ok {
-			offset := strings.Index(regionInfoCol.Value.String(), "PBUF") + 4
-			regionInfoBytes := regionInfoCol.Value[offset:]
-
-			var info proto.RegionInfo
-			pb.Unmarshal(regionInfoBytes, &info)
-
-			region := &regionInfo{
-				server:   rr.Columns["info:server"].Value.String(),
-				startKey: info.GetStartKey(),
-				endKey:   info.GetEndKey(),
-				name:     rr.Row.String(),
-				ts:       rr.Columns["info:server"].Timestamp.String(),
-			}
-
+		if region := c.parseRegion(rr); region != nil {
 			log.Debug("Found region [region: %s]", region.name)
 
 			c.cacheLocation(table, region)
@@ -282,6 +277,10 @@ func (c *Client) locateRegion(table, row []byte, useCache bool) *regionInfo {
 }
 
 func (c *Client) createRegionName(table, startKey []byte, id string, newFormat bool) []byte {
+	if len(startKey) == 0 {
+		startKey = make([]byte, 1)
+	}
+
 	b := bytes.Join([][]byte{table, startKey, []byte(id)}, []byte(","))
 
 	if newFormat {
@@ -293,10 +292,58 @@ func (c *Client) createRegionName(table, startKey []byte, id string, newFormat b
 }
 
 func (c *Client) prefetchRegionCache(table []byte) {
-	startRow := c.createRegionName(table, nil, ZEROS, false
-	stopRow := c.createRegionName(table, nil, ZEROS, false)
+	if bytes.Equal(table, META_TABLE_NAME) {
+		return
+	}
 
+	if v, ok := c.prefetched[string(table)]; ok && v {
+		return
+	}
 
+	startRow := table
+	stopRow := incrementByteString(table, len(table)-1)
+
+	scan := newScan(META_TABLE_NAME, c)
+
+	scan.StartRow = startRow
+	scan.StopRow = stopRow
+
+	scan.Map(func(r *ResultRow) {
+		region := c.parseRegion(r)
+		if region != nil {
+			c.cacheLocation(table, region)
+		}
+	})
+
+	c.prefetched[string(table)] = true
+}
+
+func (c *Client) parseRegion(rr *ResultRow) *regionInfo {
+	if regionInfoCol, ok := rr.Columns["info:regioninfo"]; ok {
+		offset := strings.Index(regionInfoCol.Value.String(), "PBUF") + 4
+		regionInfoBytes := regionInfoCol.Value[offset:]
+
+		var info proto.RegionInfo
+		err := pb.Unmarshal(regionInfoBytes, &info)
+
+		if err != nil {
+			log.Error("Unable to parse region location: %#v", err)
+		}
+
+		log.Debug("Parsed region info [name=%s]", rr.Row.String())
+
+		return &regionInfo{
+			server:   rr.Columns["info:server"].Value.String(),
+			startKey: info.GetStartKey(),
+			endKey:   info.GetEndKey(),
+			name:     rr.Row.String(),
+			ts:       rr.Columns["info:server"].Timestamp.String(),
+		}
+	}
+
+	log.Error("Unable to parse region location (no regioninfo column): %#v", rr)
+
+	return nil
 }
 
 func (c *Client) cacheLocation(table []byte, region *regionInfo) {

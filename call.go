@@ -6,6 +6,7 @@ import (
 )
 
 type call struct {
+	id             uint32
 	methodName     string
 	request        pb.Message
 	responseBuffer pb.Message
@@ -38,9 +39,12 @@ func newCall(request pb.Message) *call {
 		responseCh:     make(chan *pb.Message),
 	}
 }
+func (c *call) setid(id uint32) {
+	c.id = id
+}
 
 func (c *call) complete(err error, response []byte) {
-	log.Debug("Response received [err=%#v] [response_n=%d]", err, len(response))
+	log.Debug("Response received [callId=%d] [methodName=%s] [err=%#v] [response_n=%d]", c.id, c.methodName, err, len(response))
 
 	if err != nil {
 		panic(err)
@@ -52,4 +56,5 @@ func (c *call) complete(err error, response []byte) {
 	}
 
 	c.responseCh <- &c.responseBuffer
+	close(c.responseCh)
 }

@@ -5,6 +5,8 @@ import (
 	"github.com/lazyshot/go-hbase/proto"
 
 	"bytes"
+	"fmt"
+	"strings"
 )
 
 type Scan struct {
@@ -16,7 +18,8 @@ type Scan struct {
 	StartRow []byte
 	StopRow  []byte
 
-	Columns []*proto.Column
+	families   [][]byte
+	qualifiers [][][]byte
 
 	nextStartRow []byte
 
@@ -32,6 +35,9 @@ func newScan(table []byte, client *Client) *Scan {
 		client:       client,
 		table:        table,
 		nextStartRow: nil,
+
+		families:   make([][]byte, 0),
+		qualifiers: make([][][]byte, 0),
 
 		numCached: 100,
 		closed:    false,
@@ -58,9 +64,58 @@ func (s *Scan) Map(f func(*ResultRow)) {
 
 func (s *Scan) Close() {
 	if s.closed == false {
+		log.Debug("Closing scan: %d", s.id)
 		s.closeScan(s.server, s.location, s.id)
 		s.closed = true
 	}
+}
+
+func (s *Scan) AddString(famqual string) error {
+	parts := strings.Split(famqual, ":")
+
+	if len(parts) > 2 {
+		return fmt.Errorf("Too many colons were found in the family:qualifier string. '%s'", famqual)
+	} else if len(parts) == 2 {
+		s.AddStringColumn(parts[0], parts[1])
+	} else {
+		s.AddStringFamily(famqual)
+	}
+
+	return nil
+}
+
+func (s *Scan) AddStringColumn(family, qual string) {
+	s.AddColumn([]byte(family), []byte(qual))
+}
+
+func (s *Scan) AddStringFamily(family string) {
+	s.AddFamily([]byte(family))
+}
+
+func (s *Scan) AddColumn(family, qual []byte) {
+	s.AddFamily(family)
+
+	pos := s.posOfFamily(family)
+
+	s.qualifiers[pos] = append(s.qualifiers[pos], qual)
+}
+
+func (s *Scan) AddFamily(family []byte) {
+	pos := s.posOfFamily(family)
+
+	if pos == -1 {
+		s.families = append(s.families, family)
+		s.qualifiers = append(s.qualifiers, make([][]byte, 0))
+	}
+}
+
+func (s *Scan) posOfFamily(family []byte) int {
+	for p, v := range s.families {
+		if bytes.Equal(family, v) {
+			return p
+		}
+	}
+	return -1
 }
 
 func (s *Scan) getData(nextStart []byte) []*ResultRow {
@@ -87,12 +142,25 @@ func (s *Scan) getData(nextStart []byte) []*ResultRow {
 		req.Scan.StartRow = s.StartRow
 		req.Scan.StopRow = s.StopRow
 	}
-	log.Debug("sending scan request: [server=%s]", server.name)
+
+	for i, v := range s.families {
+		req.Scan.Column = append(req.Scan.Column, &proto.Column{
+			Family:    v,
+			Qualifier: s.qualifiers[i],
+		})
+	}
+
+	log.Debug("sending scan request: [server=%s] [id=%d]", server.name, s.id)
 
 	cl := newCall(req)
 	server.call(cl)
 
-	return s.processResponse(<-cl.responseCh)
+	log.Debug("sent scan request: [server=%s] [id=%d]", server.name, s.id)
+
+	select {
+	case msg := <-cl.responseCh:
+		return s.processResponse(msg)
+	}
 }
 
 func (s *Scan) processResponse(response *pb.Message) []*ResultRow {
@@ -111,15 +179,6 @@ func (s *Scan) processResponse(response *pb.Message) []*ResultRow {
 	results := res.GetResults()
 	n := len(results)
 
-	if res.GetMoreResults() && n != 0 {
-		tbr := make([]*ResultRow, n)
-		for i, v := range results {
-			tbr[i] = newResultRow(v)
-		}
-
-		return tbr
-	}
-
 	if (n == s.numCached) ||
 		len(s.location.endKey) == 0 ||
 		(s.StopRow != nil && bytes.Compare(s.location.endKey, s.StopRow) > 0 && n < s.numCached) {
@@ -127,6 +186,7 @@ func (s *Scan) processResponse(response *pb.Message) []*ResultRow {
 	}
 
 	if nextRegion {
+		log.Debug("Reset values, go to next region")
 		s.nextStartRow = incrementByteString(s.location.endKey, len(s.location.endKey)-1)
 		s.closeScan(s.server, s.location, s.id)
 		s.server = nil
@@ -156,6 +216,7 @@ func (s *Scan) next() []*ResultRow {
 }
 
 func (s *Scan) closeScan(server *connection, location *regionInfo, id uint64) {
+
 	req := &proto.ScanRequest{
 		Region: &proto.RegionSpecifier{
 			Type:  proto.RegionSpecifier_REGION_NAME.Enum(),
@@ -164,8 +225,9 @@ func (s *Scan) closeScan(server *connection, location *regionInfo, id uint64) {
 		ScannerId:    pb.Uint64(id),
 		CloseScanner: pb.Bool(true),
 	}
-
-	server.call(newCall(req))
+	cl := newCall(req)
+	server.call(cl)
+	<-cl.responseCh
 }
 
 func (s *Scan) getServerAndLocation(table, startRow []byte) (server *connection, location *regionInfo) {

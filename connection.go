@@ -120,6 +120,8 @@ func (c *connection) call(request *call) {
 		RequestParam: pb.Bool(true),
 	}
 
+	request.setid(uint32(id))
+
 	bfrh := newOutputBuffer()
 	bfrh.WritePBMessage(rh)
 
@@ -134,7 +136,7 @@ func (c *connection) call(request *call) {
 	if err != nil {
 		panic(err)
 	}
-	log.Debug("Sent bytes to server [n=%d] [connection=%s]", n, c.name)
+	log.Debug("Sent bytes to server [callId=%d] [n=%d] [connection=%s]", id, n, c.name)
 
 	if n != len(buf.Bytes()) {
 		panic("Sent bytes not match number bytes")
@@ -153,6 +155,8 @@ func (c *connection) processMessages() {
 		if err != nil {
 			panic(err)
 		}
+
+		log.Debug("Responseheader received [id=%d]", rh.GetCallId())
 
 		callId := rh.GetCallId()
 		call, ok := c.calls[int(callId)]

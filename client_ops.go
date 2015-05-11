@@ -19,7 +19,7 @@ func (c *Client) Get(table string, get *Get) (*ResultRow, error) {
 	return nil, fmt.Errorf("No valid response seen [response: %#v]", response)
 }
 
-func (c *Client) AsyncGets(table string, gets []*Get) chan *ResultRow {
+func (c *Client) AsyncGets(table string, results chan *ResultRow, gets []*Get) {
 	actions := make([]multiaction, len(gets))
 
 	for i, v := range gets {
@@ -30,7 +30,6 @@ func (c *Client) AsyncGets(table string, gets []*Get) chan *ResultRow {
 	}
 
 	calls := c.multiaction([]byte(table), actions)
-	results := make(chan *ResultRow, 1000)
 	wg := new(sync.WaitGroup)
 	wg.Add(len(calls))
 
@@ -58,12 +57,11 @@ func (c *Client) AsyncGets(table string, gets []*Get) chan *ResultRow {
 			wg.Done()
 		}()
 	}
-
-	return results
 }
 
 func (c *Client) Gets(table string, gets []*Get) ([]*ResultRow, error) {
-	results := c.AsyncGets(table, gets)
+	results := make(chan *ResultRow, 100)
+	c.AsyncGets(table, results, gets)
 	tbr := make([]*ResultRow, 0)
 
 	for r := range results {

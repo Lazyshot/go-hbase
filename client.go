@@ -32,7 +32,7 @@ type Client struct {
 
 var log = logging.MustGetLogger("hbase-client")
 var format = logging.MustStringFormatter(
-	"%{color}%{time:15:04:05.000} %{shortfunc} [%{level:.5s}] %{color:reset} %{message}",
+	"%{color}%{time:15:04:05.000} %{shortfunc} [%{level:.5s}]:%{color:reset} %{message}",
 )
 
 func init() {
@@ -57,6 +57,11 @@ func NewClient(zkHosts []string, zkRoot string) *Client {
 	cl.initZk()
 
 	return cl
+}
+
+func (c *Client) SetLogLevel(level string) {
+	lvl, _ := logging.LogLevel(level)
+	logging.SetLevel(lvl, "hbase-client")
 }
 
 func (c *Client) initZk() {

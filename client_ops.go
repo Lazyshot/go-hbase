@@ -95,7 +95,22 @@ func (c *Client) Puts(table string, puts []*Put) (bool, error) {
 		}
 	}
 
-	c.multiaction([]byte(table), actions)
+	calls := c.multiaction([]byte(table), actions)
+
+	wg := new(sync.WaitGroup)
+	wg.Add(len(calls))
+
+	for _, call := range calls {
+		go func() {
+			<-call.responseCh
+
+			// Maybe handle these responses
+
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
 
 	return true, nil
 }

@@ -78,12 +78,11 @@ func (b *outputBuffer) writeDelimitedBuffers(bufs ...*outputBuffer) error {
 	totalLength := 0
 	lens := make([][]byte, len(bufs))
 	for i, v := range bufs {
-		lenb := newOutputBuffer()
 		n := len(v.Bytes())
-		lenb.WriteVarint32(int32(n))
+		lenb := pb.EncodeVarint(uint64(n))
 
-		totalLength += len(lenb.Bytes()) + n
-		lens[i] = lenb.Bytes()
+		totalLength += len(lenb) + n
+		lens[i] = lenb
 	}
 
 	b.WriteInt32(int32(totalLength))

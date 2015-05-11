@@ -34,28 +34,33 @@ func (c *Client) AsyncGets(table string, results chan *ResultRow, gets []*Get) {
 	wg.Add(len(calls))
 
 	go func() {
+		log.Debug("Waiting to receive multiresponses")
 		wg.Wait()
+		log.Debug("Finished receiving multiresponses")
 		close(results)
 	}()
 
-	for _, call := range calls {
-		go func() {
-			r := <-call.responseCh
+	for _, c := range calls {
+		go func(c *call) {
+			r := <-c.responseCh
 
-			switch rs := (*r).(type) {
-			case *proto.MultiResponse:
-				log.Debug("Received region action result [n=%d]", len(rs.GetRegionActionResult()))
-				for _, v := range rs.GetRegionActionResult() {
-					for _, v2 := range v.GetResultOrException() {
-						if res := v2.GetResult(); res != nil {
-							results <- newResultRow(res)
+			log.Debug("Received multiresponse: %#v", r)
+			if r != nil {
+				switch rs := (*r).(type) {
+				case *proto.MultiResponse:
+					log.Debug("Received region action result [n=%d]", len(rs.GetRegionActionResult()))
+					for _, v := range rs.GetRegionActionResult() {
+						for _, v2 := range v.GetResultOrException() {
+							if res := v2.GetResult(); res != nil {
+								results <- newResultRow(res)
+							}
 						}
 					}
 				}
 			}
 
 			wg.Done()
-		}()
+		}(c)
 	}
 }
 
@@ -98,14 +103,14 @@ func (c *Client) Puts(table string, puts []*Put) (bool, error) {
 	wg := new(sync.WaitGroup)
 	wg.Add(len(calls))
 
-	for _, call := range calls {
-		go func() {
-			<-call.responseCh
+	for _, c := range calls {
+		go func(c *call) {
+			<-c.responseCh
 
 			// Maybe handle these responses
 
 			wg.Done()
-		}()
+		}(c)
 	}
 
 	wg.Wait()

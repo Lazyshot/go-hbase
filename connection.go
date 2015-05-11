@@ -123,10 +123,16 @@ func (c *connection) call(request *call) {
 	request.setid(uint32(id))
 
 	bfrh := newOutputBuffer()
-	bfrh.WritePBMessage(rh)
+	err := bfrh.WritePBMessage(rh)
+	if err != nil {
+		panic(err)
+	}
 
 	bfr := newOutputBuffer()
-	bfr.WritePBMessage(request.request)
+	err = bfr.WritePBMessage(request.request)
+	if err != nil {
+		panic(err)
+	}
 
 	buf := newOutputBuffer()
 	buf.writeDelimitedBuffers(bfrh, bfr)
@@ -156,7 +162,7 @@ func (c *connection) processMessages() {
 			panic(err)
 		}
 
-		log.Debug("Responseheader received [id=%d]", rh.GetCallId())
+		log.Debug("Responseheader received [id=%d] [conn=%s]", rh.GetCallId(), c.name)
 
 		callId := rh.GetCallId()
 		call, ok := c.calls[int(callId)]

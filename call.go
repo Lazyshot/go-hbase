@@ -3,6 +3,8 @@ package hbase
 import (
 	pb "github.com/golang/protobuf/proto"
 	"github.com/lazyshot/go-hbase/proto"
+
+	"reflect"
 )
 
 type call struct {
@@ -36,7 +38,7 @@ func newCall(request pb.Message) *call {
 		methodName:     methodName,
 		request:        request,
 		responseBuffer: responseBuffer,
-		responseCh:     make(chan *pb.Message),
+		responseCh:     make(chan *pb.Message, 10),
 	}
 }
 func (c *call) setid(id uint32) {
@@ -55,6 +57,7 @@ func (c *call) complete(err error, response []byte) {
 		panic(err2)
 	}
 
+	log.Debug("Response unmarshaled [callId=%d] [type=%s]", c.id, reflect.TypeOf(c.responseBuffer).String())
+
 	c.responseCh <- &c.responseBuffer
-	close(c.responseCh)
 }

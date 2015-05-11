@@ -180,20 +180,20 @@ func (c *Client) multiaction(table []byte, actions []multiaction) []*call {
 
 	for server, as := range actionsByServer {
 		region_actions := make([]*proto.RegionAction, len(as))
-		i := 0
 
+		i := 0
 		for region, acts := range as {
 			racts := make([]*proto.Action, len(acts))
-			for i, act := range acts {
-				racts[i] = &proto.Action{
-					Index: pb.Uint32(uint32(i)),
+			for j, act := range acts {
+				racts[j] = &proto.Action{
+					Index: pb.Uint32(uint32(j)),
 				}
 
 				switch a := act.action.(type) {
 				case *Get:
-					racts[i].Get = a.toProto().(*proto.Get)
+					racts[j].Get = a.toProto().(*proto.Get)
 				case *Put:
-					racts[i].Mutation = a.toProto().(*proto.MutationProto)
+					racts[j].Mutation = a.toProto().(*proto.MutationProto)
 				}
 			}
 
@@ -206,6 +206,8 @@ func (c *Client) multiaction(table []byte, actions []multiaction) []*call {
 				},
 				Action: racts,
 			}
+
+			i++
 		}
 
 		log.Debug("Sending RegionActions [n=%d]", len(region_actions))

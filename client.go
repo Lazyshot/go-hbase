@@ -25,6 +25,8 @@ type Client struct {
 	servers               map[string]*connection
 	cachedRegionLocations map[string]map[string]*regionInfo
 
+	maxRetries int
+
 	prefetched map[string]bool
 
 	rootServer *proto.ServerName
@@ -52,6 +54,7 @@ func NewClient(zkHosts []string, zkRoot string) *Client {
 		servers:               make(map[string]*connection),
 		cachedRegionLocations: make(map[string]map[string]*regionInfo),
 		prefetched:            make(map[string]bool),
+		maxRetries:            MAX_ACTION_RETRIES,
 	}
 
 	cl.initZk()
@@ -122,10 +125,10 @@ func (c *Client) getRegionConnection(server string) *connection {
 	return conn
 }
 
-func (c *Client) action(table, row []byte, action Action) *call {
-	log.Debug("Attempting action [table: %s] [row: %s] [action: %#v]", table, row, action)
+func (c *Client) action(table, row []byte, action Action, useCache bool, retries int) chan pb.Message {
+	log.Debug("Attempting action [table: %s] [row: %s] [action: %#v] [useCache: %t]", table, row, action, useCache)
 
-	region := c.locateRegion(table, row, true)
+	region := c.locateRegion(table, row, useCache)
 	conn := c.getRegionConnection(region.server)
 
 	regionSpecifier := &proto.RegionSpecifier{
@@ -147,11 +150,38 @@ func (c *Client) action(table, row []byte, action Action) *call {
 		})
 	}
 
+	result := make(chan pb.Message)
+
+	go func() {
+		r := <-cl.responseCh
+
+		switch r.(type) {
+		case *exception:
+			newr := c.action(table, row, action, false, retries+1)
+			result <- <-newr
+			return
+		default:
+			result <- r
+		}
+	}()
+
 	if cl != nil {
-		conn.call(cl)
+		err := conn.call(cl)
+
+		if err != nil {
+			log.Warning("Error return while attempting call [err=%#v]", err)
+			// purge dead server
+			delete(c.servers, region.server)
+
+			if retries <= c.maxRetries {
+				// retry action
+				log.Info("Retrying action for the %d time", retries+1)
+				c.action(table, row, action, false, retries+1)
+			}
+		}
 	}
 
-	return cl
+	return result
 }
 
 type multiaction struct {
@@ -159,11 +189,11 @@ type multiaction struct {
 	action Action
 }
 
-func (c *Client) multiaction(table []byte, actions []multiaction) []*call {
+func (c *Client) multiaction(table []byte, actions []multiaction, useCache bool, retries int) chan pb.Message {
 	actionsByServer := make(map[string]map[string][]multiaction)
 
 	for _, action := range actions {
-		region := c.locateRegion(table, action.row, true)
+		region := c.locateRegion(table, action.row, useCache)
 
 		if _, ok := actionsByServer[region.server]; !ok {
 			actionsByServer[region.server] = make(map[string][]multiaction)
@@ -176,7 +206,7 @@ func (c *Client) multiaction(table []byte, actions []multiaction) []*call {
 		}
 	}
 
-	calls := make([]*call, 0)
+	chs := make([]chan pb.Message, 0)
 
 	for server, as := range actionsByServer {
 		region_actions := make([]*proto.RegionAction, len(as))
@@ -217,13 +247,43 @@ func (c *Client) multiaction(table []byte, actions []multiaction) []*call {
 		}
 
 		cl := newCall(req)
-		conn := c.getRegionConnection(server)
-		conn.call(cl)
 
-		calls = append(calls, cl)
+		result := make(chan pb.Message)
+
+		go func(actionsByServer map[string]map[string][]multiaction, server string) {
+			r := <-cl.responseCh
+
+			switch r.(type) {
+			case *exception:
+				actions := make([]multiaction, 0)
+				for _, acts := range actionsByServer[server] {
+					actions = append(actions, acts...)
+				}
+				newr := c.multiaction(table, actions, false, retries+1)
+
+				for x := range newr {
+					result <- x
+				}
+				return
+			default:
+				result <- r
+			}
+
+			close(result)
+		}(actionsByServer, server)
+
+		conn := c.getRegionConnection(server)
+		err := conn.call(cl)
+
+		if err != nil {
+			delete(c.servers, server)
+			cl.complete(err, nil)
+		}
+
+		chs = append(chs, result)
 	}
 
-	return calls
+	return merge(chs...)
 }
 
 func (c *Client) locateRegion(table, row []byte, useCache bool) *regionInfo {
@@ -240,7 +300,7 @@ func (c *Client) locateRegion(table, row []byte, useCache bool) *regionInfo {
 
 	c.prefetchRegionCache(table)
 
-	if r := c.getCachedLocation(table, row); r != nil {
+	if r := c.getCachedLocation(table, row); r != nil && useCache {
 		return r
 	}
 
@@ -266,7 +326,7 @@ func (c *Client) locateRegion(table, row []byte, useCache bool) *regionInfo {
 
 	response := <-call.responseCh
 
-	switch r := (*response).(type) {
+	switch r := response.(type) {
 	case *proto.GetResponse:
 		rr := newResultRow(r.GetResult())
 		if region := c.parseRegion(rr); region != nil {

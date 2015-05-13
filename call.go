@@ -12,7 +12,7 @@ type call struct {
 	methodName     string
 	request        pb.Message
 	responseBuffer pb.Message
-	responseCh     chan *pb.Message
+	responseCh     chan pb.Message
 }
 
 func newCall(request pb.Message) *call {
@@ -38,7 +38,7 @@ func newCall(request pb.Message) *call {
 		methodName:     methodName,
 		request:        request,
 		responseBuffer: responseBuffer,
-		responseCh:     make(chan *pb.Message, 10),
+		responseCh:     make(chan pb.Message, 1),
 	}
 }
 func (c *call) setid(id uint32) {
@@ -48,16 +48,23 @@ func (c *call) setid(id uint32) {
 func (c *call) complete(err error, response []byte) {
 	log.Debug("Response received [callId=%d] [methodName=%s] [err=%#v] [response_n=%d]", c.id, c.methodName, err, len(response))
 
+	defer close(c.responseCh)
+
 	if err != nil {
-		panic(err)
+		c.responseCh <- &exception{
+			msg: err.Error(),
+		}
+		return
 	}
 
 	err2 := pb.Unmarshal(response, c.responseBuffer)
 	if err2 != nil {
-		panic(err2)
+		c.responseCh <- &exception{
+			msg: err2.Error(),
+		}
+		return
 	}
 
 	log.Debug("Response unmarshaled [callId=%d] [type=%s]", c.id, reflect.TypeOf(c.responseBuffer).String())
-
-	c.responseCh <- &c.responseBuffer
+	c.responseCh <- c.responseBuffer
 }

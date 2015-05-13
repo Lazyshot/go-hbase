@@ -163,9 +163,9 @@ func (s *Scan) getData(nextStart []byte) []*ResultRow {
 	}
 }
 
-func (s *Scan) processResponse(response *pb.Message) []*ResultRow {
+func (s *Scan) processResponse(response pb.Message) []*ResultRow {
 	var res *proto.ScanResponse
-	switch r := (*response).(type) {
+	switch r := response.(type) {
 	case *proto.ScanResponse:
 		res = r
 	default:

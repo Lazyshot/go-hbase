@@ -15,3 +15,11 @@ type regionInfo struct {
 type Action interface {
 	toProto() pb.Message
 }
+
+type exception struct {
+	msg string
+}
+
+func (m *exception) Reset()         { *m = exception{} }
+func (m *exception) String() string { return m.msg }
+func (*exception) ProtoMessage()    {}

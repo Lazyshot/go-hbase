@@ -112,7 +112,7 @@ func (c *connection) writeConnectionHeader() error {
 	return nil
 }
 
-func (c *connection) call(request *call) {
+func (c *connection) call(request *call) error {
 	id := c.callId.IncrAndGet()
 	rh := &proto.RequestHeader{
 		CallId:       pb.Uint32(uint32(id)),
@@ -139,14 +139,18 @@ func (c *connection) call(request *call) {
 
 	c.calls[id] = request
 	n, err := c.socket.Write(buf.Bytes())
+
 	if err != nil {
-		panic(err)
+		return err
 	}
+
 	log.Debug("Sent bytes to server [callId=%d] [n=%d] [connection=%s]", id, n, c.name)
 
 	if n != len(buf.Bytes()) {
-		panic("Sent bytes not match number bytes")
+		return fmt.Errorf("Sent bytes not match number bytes [n=%d] [actual_n=%d]", n, len(buf.Bytes()))
 	}
+
+	return nil
 }
 
 func (c *connection) processMessages() {

@@ -35,8 +35,8 @@ import (
 func main() {
 	client := hbase.NewClient([]string{"localhost"}, "/hbase")
 
-	put := hbase.CreateNewPut([]byte("test1"), []byte("info"))
-	put.AddStringValue("test_qual", "test_val")
+	put := hbase.CreateNewPut([]byte("test1"))
+	put.AddStringValue("info", "test_qual", "test_val")
 	res, err := client.Put("test", put)
 
 	if err != nil {

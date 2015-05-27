@@ -12,7 +12,7 @@ type regionInfo struct {
 	ts       string
 }
 
-type Action interface {
+type action interface {
 	toProto() pb.Message
 }
 

@@ -54,7 +54,7 @@ func NewClient(zkHosts []string, zkRoot string) *Client {
 		servers:               make(map[string]*connection),
 		cachedRegionLocations: make(map[string]map[string]*regionInfo),
 		prefetched:            make(map[string]bool),
-		maxRetries:            MAX_ACTION_RETRIES,
+		maxRetries:            max_action_retries,
 	}
 
 	cl.initZk()
@@ -86,14 +86,14 @@ func (c *Client) initZk() {
 }
 
 func (c *Client) decodeMeta(data []byte) *proto.ServerName {
-	if data[0] != MAGIC {
+	if data[0] != magic {
 		return nil
 	}
 
 	var n int32
-	binary.Read(bytes.NewBuffer(data[1:]), BYTE_ORDER, &n)
+	binary.Read(bytes.NewBuffer(data[1:]), byte_order, &n)
 
-	dataOffset := MAGIC_SIZE + ID_LENGTH_SIZE + int(n)
+	dataOffset := magic_size + id_length_size + int(n)
 
 	data = data[(dataOffset + 4):]
 
@@ -125,7 +125,7 @@ func (c *Client) getRegionConnection(server string) *connection {
 	return conn
 }
 
-func (c *Client) action(table, row []byte, action Action, useCache bool, retries int) chan pb.Message {
+func (c *Client) action(table, row []byte, action action, useCache bool, retries int) chan pb.Message {
 	log.Debug("Attempting action [table: %s] [row: %s] [action: %#v] [useCache: %t]", table, row, action, useCache)
 
 	region := c.locateRegion(table, row, useCache)
@@ -186,7 +186,7 @@ func (c *Client) action(table, row []byte, action Action, useCache bool, retries
 
 type multiaction struct {
 	row    []byte
-	action Action
+	action action
 }
 
 func (c *Client) multiaction(table []byte, actions []multiaction, useCache bool, retries int) chan pb.Message {
@@ -290,11 +290,11 @@ func (c *Client) locateRegion(table, row []byte, useCache bool) *regionInfo {
 	metaRegion := &regionInfo{
 		startKey: []byte{},
 		endKey:   []byte{},
-		name:     string(META_REGION_NAME),
+		name:     string(meta_region_name),
 		server:   c.getServerName(c.rootServer),
 	}
 
-	if bytes.Equal(table, META_TABLE_NAME) {
+	if bytes.Equal(table, meta_table_name) {
 		return metaRegion
 	}
 
@@ -311,7 +311,7 @@ func (c *Client) locateRegion(table, row []byte, useCache bool) *regionInfo {
 	call := newCall(&proto.GetRequest{
 		Region: &proto.RegionSpecifier{
 			Type:  proto.RegionSpecifier_REGION_NAME.Enum(),
-			Value: META_REGION_NAME,
+			Value: meta_region_name,
 		},
 		Get: &proto.Get{
 			Row: regionRow,
@@ -359,7 +359,7 @@ func (c *Client) createRegionName(table, startKey []byte, id string, newFormat b
 }
 
 func (c *Client) prefetchRegionCache(table []byte) {
-	if bytes.Equal(table, META_TABLE_NAME) {
+	if bytes.Equal(table, meta_table_name) {
 		return
 	}
 
@@ -370,7 +370,7 @@ func (c *Client) prefetchRegionCache(table []byte) {
 	startRow := table
 	stopRow := incrementByteString(table, len(table)-1)
 
-	scan := newScan(META_TABLE_NAME, c)
+	scan := newScan(meta_table_name, c)
 
 	scan.StartRow = startRow
 	scan.StopRow = stopRow

@@ -76,7 +76,7 @@ func (c *connection) init() error {
 
 func (c *connection) writeHead() error {
 	buf := newOutputBuffer()
-	buf.Write(HEADER)
+	buf.Write(hbase_header_bytes)
 	buf.WriteByte(0)
 	buf.WriteByte(80)
 

@@ -19,7 +19,7 @@ func newInputStream(rdr net.Conn) *inputStream {
 
 func (in *inputStream) readInt32() (int32, error) {
 	var n int32
-	err := binary.Read(in.src, BYTE_ORDER, &n)
+	err := binary.Read(in.src, byte_order, &n)
 	return n, err
 }
 

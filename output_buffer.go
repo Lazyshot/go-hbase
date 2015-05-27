@@ -27,27 +27,27 @@ func (b *outputBuffer) Write(d []byte) (int, error) {
 }
 
 func (b *outputBuffer) WriteByte(d byte) error {
-	return binary.Write(b, BYTE_ORDER, d)
+	return binary.Write(b, byte_order, d)
 }
 
 func (b *outputBuffer) WriteString(d string) error {
-	return binary.Write(b, BYTE_ORDER, d)
+	return binary.Write(b, byte_order, d)
 }
 
 func (b *outputBuffer) WriteInt32(d int32) error {
-	return binary.Write(b, BYTE_ORDER, d)
+	return binary.Write(b, byte_order, d)
 }
 
 func (b *outputBuffer) WriteInt64(d int64) error {
-	return binary.Write(b, BYTE_ORDER, d)
+	return binary.Write(b, byte_order, d)
 }
 
 func (b *outputBuffer) WriteFloat32(d float32) error {
-	return binary.Write(b, BYTE_ORDER, d)
+	return binary.Write(b, byte_order, d)
 }
 
 func (b *outputBuffer) WriteFloat64(d float64) error {
-	return binary.Write(b, BYTE_ORDER, d)
+	return binary.Write(b, byte_order, d)
 }
 
 func (b *outputBuffer) WriteVarint32(n int32) error {

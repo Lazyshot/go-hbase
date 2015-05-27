@@ -3,6 +3,8 @@ go-hbase
 
 Implements a fully native HBase client for the Go programming language.
 
+API Documentation: http://godoc.org/github.com/Lazyshot/go-hbase
+
 Supported Versions
 ------------------
 

@@ -136,9 +136,7 @@ func (s *Scan) getData(nextStart []byte) []*ResultRow {
 
 	if s.id > 0 {
 		req.ScannerId = pb.Uint64(s.id)
-	}
-
-	if s.StartRow != nil && s.StopRow != nil {
+	} else if s.StartRow != nil && s.StopRow != nil {
 		req.Scan.StartRow = s.StartRow
 		req.Scan.StopRow = s.StopRow
 	}
@@ -163,12 +161,15 @@ func (s *Scan) getData(nextStart []byte) []*ResultRow {
 	}
 }
 
+var lastRegionRows int = 0
+
 func (s *Scan) processResponse(response pb.Message) []*ResultRow {
 	var res *proto.ScanResponse
 	switch r := response.(type) {
 	case *proto.ScanResponse:
 		res = r
 	default:
+		log.Error("Invalid response returned: %T", response)
 		return nil
 	}
 
@@ -179,22 +180,30 @@ func (s *Scan) processResponse(response pb.Message) []*ResultRow {
 	results := res.GetResults()
 	n := len(results)
 
+	lastRegionRows += n
+
 	if (n == s.numCached) ||
 		len(s.location.endKey) == 0 ||
-		(s.StopRow != nil && bytes.Compare(s.location.endKey, s.StopRow) > 0 && n < s.numCached) {
+		(s.StopRow != nil && bytes.Compare(s.location.endKey, s.StopRow) > 0 && n < s.numCached) ||
+		(res.GetMoreResults() && n > 0) {
 		nextRegion = false
 	}
 
-	if nextRegion {
-		log.Debug("Reset values, go to next region")
+	if n < s.numCached {
 		s.nextStartRow = incrementByteString(s.location.endKey, len(s.location.endKey)-1)
+	}
+
+	if nextRegion {
+		log.Debug("Finished %s. Num results from region: %d. On to the next one.", s.location.name, lastRegionRows)
 		s.closeScan(s.server, s.location, s.id)
 		s.server = nil
 		s.location = nil
 		s.id = 0
+		lastRegionRows = 0
 	}
 
-	if n == 0 {
+	if n == 0 && !nextRegion {
+		log.Debug("N == 0 and !nextRegion")
 		s.Close()
 	}
 

@@ -228,7 +228,7 @@ func (c *Client) multiaction(table []byte, actions []multiaction, useCache bool,
 				switch a := act.action.(type) {
 				case *Get:
 					racts[j].Get = a.toProto().(*proto.Get)
-				case *Put:
+				case *Put, *Delete:
 					racts[j].Mutation = a.toProto().(*proto.MutationProto)
 				}
 			}

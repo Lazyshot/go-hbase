@@ -104,6 +104,24 @@ func (c *Client) Delete(table string, del *Delete) (bool, error) {
 	return false, fmt.Errorf("No valid response seen [response: %#v]", response)
 }
 
+func (c *Client) Deletes(table string, dels []*Delete) (bool, error) {
+	actions := make([]multiaction, len(dels))
+
+	for i, v := range dels {
+		actions[i] = multiaction{
+			row:    v.key,
+			action: v,
+		}
+	}
+
+	ch := c.multiaction([]byte(table), actions, true, 0)
+
+	for _ = range ch {
+	}
+
+	return true, nil
+}
+
 func (c *Client) Scan(table string) *Scan {
 	return newScan([]byte(table), c)
 }

@@ -143,7 +143,7 @@ func (c *Client) action(table, row []byte, action action, useCache bool, retries
 			Region: regionSpecifier,
 			Get:    a.toProto().(*proto.Get),
 		})
-	case *Put:
+	case *Put, *Delete:
 		cl = newCall(&proto.MutateRequest{
 			Region:   regionSpecifier,
 			Mutation: a.toProto().(*proto.MutationProto),
@@ -157,8 +157,14 @@ func (c *Client) action(table, row []byte, action action, useCache bool, retries
 
 		switch r.(type) {
 		case *exception:
-			newr := c.action(table, row, action, false, retries+1)
-			result <- <-newr
+			if retries <= c.maxRetries {
+				// retry action
+				log.Info("Retrying action for the %d time", retries+1)
+				newr := c.action(table, row, action, false, retries+1)
+				result <- <-newr
+			} else {
+				result <- r
+			}
 			return
 		default:
 			result <- r

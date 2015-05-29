@@ -92,6 +92,18 @@ func (c *Client) Puts(table string, puts []*Put) (bool, error) {
 	return true, nil
 }
 
+func (c *Client) Delete(table string, del *Delete) (bool, error) {
+	ch := c.action([]byte(table), del.key, del, true, 0)
+
+	response := <-ch
+	switch r := response.(type) {
+	case *proto.MutateResponse:
+		return r.GetProcessed(), nil
+	}
+
+	return false, fmt.Errorf("No valid response seen [response: %#v]", response)
+}
+
 func (c *Client) Scan(table string) *Scan {
 	return newScan([]byte(table), c)
 }

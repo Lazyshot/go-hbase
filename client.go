@@ -29,7 +29,8 @@ type Client struct {
 
 	prefetched map[string]bool
 
-	rootServer *proto.ServerName
+	rootServer   *proto.ServerName
+	masterServer *proto.ServerName
 }
 
 var log = logging.MustGetLogger("hbase-client")
@@ -83,6 +84,14 @@ func (c *Client) initZk() {
 
 	c.rootServer = c.decodeMeta(res)
 	c.getRegionConnection(c.getServerName(c.rootServer))
+
+	res, _, _, err = c.zkClient.GetW(c.zkRoot + "/master")
+
+	if err != nil {
+		panic(err)
+	}
+
+	c.masterServer = c.decodeMeta(res)
 }
 
 func (c *Client) decodeMeta(data []byte) *proto.ServerName {
@@ -115,7 +124,7 @@ func (c *Client) getRegionConnection(server string) *connection {
 		return s
 	}
 
-	conn, err := newConnection(server)
+	conn, err := newConnection(server, false)
 	if err != nil {
 		panic(err)
 	}
@@ -123,6 +132,35 @@ func (c *Client) getRegionConnection(server string) *connection {
 	c.servers[server] = conn
 
 	return conn
+}
+
+func (c *Client) getMasterConnection() *connection {
+	server := c.getServerName(c.masterServer)
+	if s, ok := c.servers[server]; ok {
+		return s
+	}
+
+	conn, err := newConnection(server, true)
+	if err != nil {
+		panic(err)
+	}
+
+	c.servers[server] = conn
+
+	return conn
+}
+
+func (c *Client) adminAction(req pb.Message) chan pb.Message {
+	conn := c.getMasterConnection()
+	cl := newCall(req)
+
+	err := conn.call(cl)
+
+	if err != nil {
+		panic(err)
+	}
+
+	return cl.responseCh
 }
 
 func (c *Client) action(table, row []byte, action action, useCache bool, retries int) chan pb.Message {
@@ -406,11 +444,13 @@ func (c *Client) parseRegion(rr *ResultRow) *regionInfo {
 		log.Debug("Parsed region info [name=%s]", rr.Row.String())
 
 		return &regionInfo{
-			server:   rr.Columns["info:server"].Value.String(),
-			startKey: info.GetStartKey(),
-			endKey:   info.GetEndKey(),
-			name:     rr.Row.String(),
-			ts:       rr.Columns["info:server"].Timestamp.String(),
+			server:         rr.Columns["info:server"].Value.String(),
+			startKey:       info.GetStartKey(),
+			endKey:         info.GetEndKey(),
+			name:           rr.Row.String(),
+			tableNamespace: string(info.GetTableName().GetNamespace()),
+			tableName:      string(info.GetTableName().GetQualifier()),
+			ts:             rr.Columns["info:server"].Timestamp.String(),
 		}
 	}
 

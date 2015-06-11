@@ -5,11 +5,13 @@ import (
 )
 
 type regionInfo struct {
-	server   string
-	startKey []byte
-	endKey   []byte
-	name     string
-	ts       string
+	server         string
+	startKey       []byte
+	endKey         []byte
+	name           string
+	ts             string
+	tableNamespace string
+	tableName      string
 }
 
 type action interface {
@@ -23,3 +25,8 @@ type exception struct {
 func (m *exception) Reset()         { *m = exception{} }
 func (m *exception) String() string { return m.msg }
 func (*exception) ProtoMessage()    {}
+
+type TableInfo struct {
+	TableName string
+	Families  []string
+}

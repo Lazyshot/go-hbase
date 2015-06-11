@@ -32,6 +32,9 @@ func newCall(request pb.Message) *call {
 	case *proto.ScanRequest:
 		responseBuffer = &proto.ScanResponse{}
 		methodName = "Scan"
+	case *proto.GetTableDescriptorsRequest:
+		responseBuffer = &proto.GetTableDescriptorsResponse{}
+		methodName = "GetTableDescriptors"
 	}
 
 	return &call{

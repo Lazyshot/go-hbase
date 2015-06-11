@@ -125,3 +125,26 @@ func (c *Client) Deletes(table string, dels []*Delete) (bool, error) {
 func (c *Client) Scan(table string) *Scan {
 	return newScan([]byte(table), c)
 }
+
+func (c *Client) GetTables() []TableInfo {
+	res := c.adminAction(&proto.GetTableDescriptorsRequest{})
+
+	response := <-res
+	switch r := response.(type) {
+	case *proto.GetTableDescriptorsResponse:
+		tables := make([]TableInfo, len(r.GetTableSchema()))
+		for i, table := range r.GetTableSchema() {
+			tables[i] = TableInfo{
+				TableName: string(table.GetTableName().GetQualifier()),
+				Families:  make([]string, len(table.GetColumnFamilies())),
+			}
+
+			for j, cf := range table.GetColumnFamilies() {
+				tables[i].Families[j] = string(cf.GetName())
+			}
+		}
+		return tables
+	}
+
+	return nil
+}

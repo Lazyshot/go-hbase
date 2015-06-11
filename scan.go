@@ -58,6 +58,10 @@ func (s *Scan) Map(f func(*ResultRow)) {
 
 		for _, v := range results {
 			f(v)
+
+			if s.closed {
+				return
+			}
 		}
 	}
 }

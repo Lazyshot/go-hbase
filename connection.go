@@ -19,11 +19,13 @@ type connection struct {
 
 	calls  map[int]*call
 	callId *atomicCounter
+
+	isMaster bool
 }
 
 var connectionIds *atomicCounter = newAtomicCounter()
 
-func newConnection(connstr string) (*connection, error) {
+func newConnection(connstr string, isMaster bool) (*connection, error) {
 	id := connectionIds.IncrAndGet()
 
 	log.Debug("Connecting to server[id=%d] [%s]", id, connstr)
@@ -45,6 +47,8 @@ func newConnection(connstr string) (*connection, error) {
 
 		calls:  make(map[int]*call),
 		callId: newAtomicCounter(),
+
+		isMaster: isMaster,
 	}
 
 	err = c.init()
@@ -87,11 +91,16 @@ func (c *connection) writeHead() error {
 
 func (c *connection) writeConnectionHeader() error {
 	buf := newOutputBuffer()
+	service := pb.String("ClientService")
+	if c.isMaster {
+		service = pb.String("MasterService")
+	}
+
 	err := buf.WritePBMessage(&proto.ConnectionHeader{
 		UserInfo: &proto.UserInformation{
 			EffectiveUser: pb.String("bryan"),
 		},
-		ServiceName: pb.String("ClientService"),
+		ServiceName: service,
 	})
 	if err != nil {
 		return err

@@ -38,12 +38,17 @@ var format = logging.MustStringFormatter(
 	"%{color}%{time:15:04:05.000} %{shortfunc} [%{level:.5s}]:%{color:reset} %{message}",
 )
 
+var silentLogger struct{}
+
+func (silentLogger) Printf(format string, a ...interface{}) {}
+
 func init() {
 	backend := logging.NewLogBackend(os.Stderr, "", 0)
 	backendFormatter := logging.NewBackendFormatter(backend, format)
 	logging.SetBackend(backendFormatter)
 
 	logging.SetLevel(logging.INFO, "hbase-client")
+	zk.DefaultLogger = silentLogger
 }
 
 func NewClient(zkHosts []string, zkRoot string) *Client {

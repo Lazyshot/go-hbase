@@ -38,9 +38,9 @@ var format = logging.MustStringFormatter(
 	"%{color}%{time:15:04:05.000} %{shortfunc} [%{level:.5s}]:%{color:reset} %{message}",
 )
 
-var silentLogger struct{}
-
-func (silentLogger) Printf(format string, a ...interface{}) {}
+type SilentLogger struct{}
+func (s *SilentLogger) Printf(format string, a ...interface{}) {}
+var silentLogger = &SilentLogger{}
 
 func init() {
 	backend := logging.NewLogBackend(os.Stderr, "", 0)

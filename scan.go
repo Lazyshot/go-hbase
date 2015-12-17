@@ -193,11 +193,12 @@ func (s *Scan) getData(nextStart []byte) []*ResultRow {
 	if s.id > 0 {
 		req.ScannerId = pb.Uint64(s.id)
 	} else {
-		if s.StartRow != nil && s.StopRow != nil {
+		if s.StartRow != nil {
 			req.Scan.StartRow = s.StartRow
+		}
+		if s.StopRow != nil {
 			req.Scan.StopRow = s.StopRow
 		}
-
 		if s.timeRange != nil {
 			req.Scan.TimeRange = &proto.TimeRange{
 				From: pb.Uint64(uint64(s.timeRange.From.Unix()) * 1000),

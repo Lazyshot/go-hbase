@@ -1,6 +1,8 @@
 package hbase
 
 import (
+	"time"
+
 	pb "github.com/golang/protobuf/proto"
 	"github.com/lazyshot/go-hbase/proto"
 
@@ -26,6 +28,9 @@ type Scan struct {
 	numCached int
 	closed    bool
 
+	//for filters
+	timeRange *TimeRange
+
 	location *regionInfo
 	server   *connection
 }
@@ -41,7 +46,34 @@ func newScan(table []byte, client *Client) *Scan {
 
 		numCached: 100,
 		closed:    false,
+
+		timeRange: nil,
 	}
+}
+
+// set scan time range
+func (s *Scan) SetTimeRange(from time.Time, to time.Time) {
+	if s.timeRange == nil {
+		s.timeRange = &TimeRange{
+			From: from,
+			To:   to,
+		}
+	} else {
+		s.timeRange.From = from
+		s.timeRange.To = to
+	}
+}
+
+// set scan time start only.
+//if only set start, use time.Now() as end automaticly
+func (s *Scan) SetTimeRangeFrom(from time.Time) {
+	s.SetTimeRange(from, time.Now())
+}
+
+// set scan time end only.
+//if only set end, use time.Unix(0, 0)(Jan 1st, 1970) as start automaticly
+func (s *Scan) SetTimeRangeTo(to time.Time) {
+	s.SetTimeRange(time.Unix(0, 0), to)
 }
 
 func (s *Scan) SetCached(n int) {
@@ -143,6 +175,13 @@ func (s *Scan) getData(nextStart []byte) []*ResultRow {
 	} else if s.StartRow != nil && s.StopRow != nil {
 		req.Scan.StartRow = s.StartRow
 		req.Scan.StopRow = s.StopRow
+	}
+
+	if s.timeRange != nil {
+		req.Scan.TimeRange = &proto.TimeRange{
+			From: pb.Uint64(uint64(s.timeRange.From.Unix()) * 1000),
+			To:   pb.Uint64(uint64(s.timeRange.To.Unix()) * 1000),
+		}
 	}
 
 	for i, v := range s.families {

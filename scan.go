@@ -1,6 +1,7 @@
 package hbase
 
 import (
+	"math"
 	"time"
 
 	pb "github.com/golang/protobuf/proto"
@@ -35,6 +36,23 @@ type Scan struct {
 	server   *connection
 }
 
+const (
+	// copy from golang source code time/time.go
+	// since it is private in time package, just copy it
+	secondsPerHour       = 60 * 60
+	secondsPerDay        = 24 * secondsPerHour
+	unixToInternal int64 = (1969*365 + 1969/4 - 1969/100 + 1969/400) * secondsPerDay
+)
+
+var maxTimestamp time.Time
+
+func init() {
+	// because golang's internal time represent is from Jan 1st, 1
+	// so if we want the max timestamp, we have to minus time.unixToInternal
+	// and as hbase accept a microsecond based timestamp, we divided it by 1000
+	maxTimestamp = time.Unix((math.MaxInt64-unixToInternal)/1000, 0)
+}
+
 func newScan(table []byte, client *Client) *Scan {
 	return &Scan{
 		client:       client,
@@ -65,9 +83,11 @@ func (s *Scan) SetTimeRange(from time.Time, to time.Time) {
 }
 
 // set scan time start only.
-//if only set start, use time.Now() as end automaticly
+// if set start only, use a max timestamp as end automaticly.
+// but since max timestamp is not a precise value,
+// you'd better use `SetTimeRange()` set start and end yourself.
 func (s *Scan) SetTimeRangeFrom(from time.Time) {
-	s.SetTimeRange(from, time.Now())
+	s.SetTimeRange(from, maxTimestamp)
 }
 
 // set scan time end only.
@@ -172,15 +192,17 @@ func (s *Scan) getData(nextStart []byte) []*ResultRow {
 
 	if s.id > 0 {
 		req.ScannerId = pb.Uint64(s.id)
-	} else if s.StartRow != nil && s.StopRow != nil {
-		req.Scan.StartRow = s.StartRow
-		req.Scan.StopRow = s.StopRow
-	}
+	} else {
+		if s.StartRow != nil && s.StopRow != nil {
+			req.Scan.StartRow = s.StartRow
+			req.Scan.StopRow = s.StopRow
+		}
 
-	if s.timeRange != nil {
-		req.Scan.TimeRange = &proto.TimeRange{
-			From: pb.Uint64(uint64(s.timeRange.From.Unix()) * 1000),
-			To:   pb.Uint64(uint64(s.timeRange.To.Unix()) * 1000),
+		if s.timeRange != nil {
+			req.Scan.TimeRange = &proto.TimeRange{
+				From: pb.Uint64(uint64(s.timeRange.From.Unix()) * 1000),
+				To:   pb.Uint64(uint64(s.timeRange.To.Unix()) * 1000),
+			}
 		}
 	}
 

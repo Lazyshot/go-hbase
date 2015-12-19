@@ -50,7 +50,7 @@ func init() {
 	// because golang's internal time represent is from Jan 1st, 1
 	// so if we want the max timestamp, we have to minus time.unixToInternal
 	// and as hbase accept a microsecond based timestamp, we divided it by 1000
-	maxTimestamp = time.Unix((math.MaxInt64-unixToInternal)/1000, 0)
+	maxTimestamp = time.Unix((math.MaxInt64-unixToInternal)/1e9, 0)
 }
 
 func newScan(table []byte, client *Client) *Scan {
@@ -201,8 +201,8 @@ func (s *Scan) getData(nextStart []byte) []*ResultRow {
 		}
 		if s.timeRange != nil {
 			req.Scan.TimeRange = &proto.TimeRange{
-				From: pb.Uint64(uint64(s.timeRange.From.Unix()) * 1000),
-				To:   pb.Uint64(uint64(s.timeRange.To.Unix()) * 1000),
+				From: pb.Uint64(uint64(s.timeRange.From.UnixNano() / 1e6)),
+				To:   pb.Uint64(uint64(s.timeRange.To.UnixNano() / 1e6)),
 			}
 		}
 	}

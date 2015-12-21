@@ -1,6 +1,8 @@
 package hbase
 
 import (
+	"time"
+
 	pb "github.com/golang/protobuf/proto"
 )
 
@@ -29,4 +31,9 @@ func (*exception) ProtoMessage()    {}
 type TableInfo struct {
 	TableName string
 	Families  []string
+}
+
+type TimeRange struct {
+	From time.Time
+	To   time.Time
 }

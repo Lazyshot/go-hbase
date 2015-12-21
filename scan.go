@@ -1,6 +1,9 @@
 package hbase
 
 import (
+	"math"
+	"time"
+
 	pb "github.com/golang/protobuf/proto"
 	"github.com/lazyshot/go-hbase/proto"
 
@@ -26,8 +29,28 @@ type Scan struct {
 	numCached int
 	closed    bool
 
+	//for filters
+	timeRange *TimeRange
+
 	location *regionInfo
 	server   *connection
+}
+
+const (
+	// copy from golang source code time/time.go
+	// since it is private in time package, just copy it
+	secondsPerHour       = 60 * 60
+	secondsPerDay        = 24 * secondsPerHour
+	unixToInternal int64 = (1969*365 + 1969/4 - 1969/100 + 1969/400) * secondsPerDay
+)
+
+var maxTimestamp time.Time
+
+func init() {
+	// because golang's internal time represent is from Jan 1st, 1
+	// so if we want the max timestamp, we have to minus time.unixToInternal
+	// and as hbase accept a microsecond based timestamp, we divided it by 1000
+	maxTimestamp = time.Unix((math.MaxInt64-unixToInternal)/1e9, 0)
 }
 
 func newScan(table []byte, client *Client) *Scan {
@@ -41,7 +64,36 @@ func newScan(table []byte, client *Client) *Scan {
 
 		numCached: 100,
 		closed:    false,
+
+		timeRange: nil,
 	}
+}
+
+// set scan time range
+func (s *Scan) SetTimeRange(from time.Time, to time.Time) {
+	if s.timeRange == nil {
+		s.timeRange = &TimeRange{
+			From: from,
+			To:   to,
+		}
+	} else {
+		s.timeRange.From = from
+		s.timeRange.To = to
+	}
+}
+
+// set scan time start only.
+// if set start only, use a max timestamp as end automaticly.
+// but since max timestamp is not a precise value,
+// you'd better use `SetTimeRange()` set start and end yourself.
+func (s *Scan) SetTimeRangeFrom(from time.Time) {
+	s.SetTimeRange(from, maxTimestamp)
+}
+
+// set scan time end only.
+//if only set end, use time.Unix(0, 0)(Jan 1st, 1970) as start automaticly
+func (s *Scan) SetTimeRangeTo(to time.Time) {
+	s.SetTimeRange(time.Unix(0, 0), to)
 }
 
 func (s *Scan) SetCached(n int) {
@@ -140,9 +192,19 @@ func (s *Scan) getData(nextStart []byte) []*ResultRow {
 
 	if s.id > 0 {
 		req.ScannerId = pb.Uint64(s.id)
-	} else if s.StartRow != nil && s.StopRow != nil {
-		req.Scan.StartRow = s.StartRow
-		req.Scan.StopRow = s.StopRow
+	} else {
+		if s.StartRow != nil {
+			req.Scan.StartRow = s.StartRow
+		}
+		if s.StopRow != nil {
+			req.Scan.StopRow = s.StopRow
+		}
+		if s.timeRange != nil {
+			req.Scan.TimeRange = &proto.TimeRange{
+				From: pb.Uint64(uint64(s.timeRange.From.UnixNano() / 1e6)),
+				To:   pb.Uint64(uint64(s.timeRange.To.UnixNano() / 1e6)),
+			}
+		}
 	}
 
 	for i, v := range s.families {

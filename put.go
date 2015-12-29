@@ -29,6 +29,7 @@ func (this *Put) AddValue(family, column, value []byte) {
 	this.AddValueTS(family, column, value, 0)
 }
 
+// AddValueTS use user specified timestamp
 func (this *Put) AddValueTS(family, column, value []byte, ts int64) {
 	pos := this.posOfFamily(family)
 
@@ -50,6 +51,7 @@ func (this *Put) AddStringValue(family, column, value string) {
 	this.AddValueTS([]byte(family), []byte(column), []byte(value), 0)
 }
 
+// AddStringValueTS use user specified timestamp
 func (this *Put) AddStringValueTS(family, column, value string, ts int64) {
 	this.AddValueTS([]byte(family), []byte(column), []byte(value), ts)
 }
